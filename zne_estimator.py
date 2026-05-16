@@ -111,8 +111,16 @@ class ZNEEstimator(BaseEstimatorV2):
         base_job = self._base_estimator.run(folded_pubs, precision=precision)
         base_result = base_job.result()
 
-        noisy_evs = np.stack([np.asarray(r.data.evs) for r in base_result], axis=0)
-        noisy_stds = np.stack([np.asarray(r.data.stds) for r in base_result], axis=0)
+        sample_data = base_result[0].data
+        ev_field = "evs" if hasattr(sample_data, "evs") else "values"
+        std_field = "stds" if hasattr(sample_data, "stds") else "errors"
+
+        noisy_evs = np.stack(
+            [np.asarray(getattr(r.data, ev_field)) for r in base_result], axis=0
+        )
+        noisy_stds = np.stack(
+            [np.asarray(getattr(r.data, std_field)) for r in base_result], axis=0
+        )
 
         zne_evs, zne_stds = self._extrapolate(
             np.asarray(factors, dtype=float), noisy_evs, noisy_stds,
