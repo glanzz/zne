@@ -27,12 +27,14 @@ class ZNEEstimator(BaseEstimatorV2):
         extrapolator: str = "linear",  # "linear" | "polynomial" | "exponential"
         folding: str = "global",        # "global" | "local"
         default_precision: float = 0.0,
+        store_scaled_circuits: bool = True
     ):
         self._base_estimator = base_estimator
         self._noise_factors = tuple(noise_factors)
         self._extrapolator = extrapolator
         self._folding = folding
         self._default_precision = default_precision
+        self._store_scaled_circuits = store_scaled_circuits
 
         if len(self._noise_factors) < 2:
             raise ValueError("ZNE requires at least two noise factors.")
@@ -97,20 +99,20 @@ class ZNEEstimator(BaseEstimatorV2):
         pub: EstimatorPub,
         factors: tuple[float, ...],
     ) -> PubResult:
-        transpiled_circuit = pub.circuit  # assumed already transpiled
+        transpiled_circuit = pub.circuit
         observables = pub.observables
         parameter_values = pub.parameter_values
         precision = pub.precision
 
-        # One scaled circuit per noise factor.
+        # Build folded circuits once and retain them.
+        folded_circuits = [self._fold_circuit(transpiled_circuit, nf) for nf in factors]
         folded_pubs = [
-            (self._fold_circuit(transpiled_circuit, nf), observables, parameter_values)
-            for nf in factors
+            (fc, observables, parameter_values) for fc in folded_circuits
         ]
 
         base_job = self._base_estimator.run(folded_pubs, precision=precision)
         base_result = base_job.result()
-
+        
         sample_data = base_result[0].data
         ev_field = "evs" if hasattr(sample_data, "evs") else "values"
         std_field = "stds" if hasattr(sample_data, "stds") else "errors"
@@ -131,13 +133,15 @@ class ZNEEstimator(BaseEstimatorV2):
             "zne": {
                 "noise_factors": list(factors),
                 "extrapolator": self._extrapolator,
+                "raw_pub_results": list(base_result),    # full PubResults per scale
                 "noisy_evs": noisy_evs,
                 "noisy_stds": noisy_stds,
                 "target_precision": precision,
             }
         }
+        if self._store_scaled_circuits:
+            metadata["zne"]["scaled_circuits"] = folded_circuits
         return PubResult(data=data, metadata=metadata)
-
 
 
 
