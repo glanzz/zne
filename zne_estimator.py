@@ -174,15 +174,7 @@ class ZNEEstimator(BaseEstimatorV2):
         return PubResult(data=data, metadata=metadata)
 
 
-    def _make_folded_block(self, circuit: QuantumCircuit) -> Instruction:
-        """Build a named instruction representing one (U^dagger U) fold."""
-        block = QuantumCircuit(circuit.num_qubits, name="zne_fold")
-        block.barrier()
-        block.compose(circuit.inverse(), inplace=True)
-        block.barrier()
-        block.compose(circuit, inplace=True)
     
-        return block.to_instruction()
 
     def _fold_circuit(self, circuit: QuantumCircuit, noise_factor: float) -> QuantumCircuit:
         """Apply global unitary folding to an already-transpiled circuit.
@@ -198,10 +190,15 @@ class ZNEEstimator(BaseEstimatorV2):
 
         folded = circuit.copy_empty_like()
         folded.compose(circuit, inplace=True)
+        forward = circuit.copy()
+        inverse = circuit.inverse()
 
-        fold_block = self._make_folded_block(circuit)
+
         for _ in range((n - 1) // 2):
-            folded.append(fold_block, folded.qubits)
+            folded.barrier()
+            folded.compose(inverse, inplace=True)
+            folded.barrier()
+            folded.compose(forward, inplace=True)
 
         # Mark the whole circuit so callers know not to re-optimize it.
         folded.metadata = {
