@@ -86,16 +86,16 @@ class ZNEEstimator(BaseEstimatorV2):
         return job
 
 
-    @staticmethod
-    def _validate_noise_factors(factors: Sequence[float]) -> None:
+    def _validate_noise_factors(self, factors: Sequence[float]) -> None:
         if len(factors) < 2:
             raise ValueError("ZNE requires at least two noise factors.")
         if any(nf < 1 for nf in factors):
             raise ValueError("All noise factors must be >= 1.")
-        if any(int(nf) != nf or int(nf) % 2 == 0 for nf in factors):
-            raise ValueError(
-                "Global folding requires odd integer noise factors (e.g. 1, 3, 5)."
-            )
+        if self._folding == "global":
+            if any(int(nf) != nf or int(nf) % 2 == 0 for nf in factors):
+                raise ValueError(
+                    "Global folding requires odd integer noise factors (e.g. 1, 3, 5)."
+                )
 
     def _run(
         self,
@@ -174,13 +174,25 @@ class ZNEEstimator(BaseEstimatorV2):
     
 
     def _fold_circuit(self, circuit: QuantumCircuit, noise_factor: float) -> QuantumCircuit:
-        """Apply global unitary folding to an already-transpiled circuit.
+        """Apply circuit folding to an already-transpiled circuit.
 
-        Returns ``U (U^dagger U)^((n-1)/2)`` with each repetition wrapped in a
-        ``box`` so downstream optimization passes cannot cancel the folded gates.
+        For global folding: Returns ``U (U^dagger U)^((n-1)/2)`` with each repetition
+        wrapped so downstream optimization passes cannot cancel the folded gates.
+
+        For local folding: Folds individual gates to approximate the target noise factor.
+
         The input is assumed to be the transpiled, ISA-compliant circuit; the
         output must NOT be transpiled again with optimization enabled.
         """
+        if self._folding == "global":
+            return self._fold_circuit_global(circuit, noise_factor)
+        elif self._folding == "local":
+            return self._fold_circuit_local(circuit, noise_factor)
+        else:
+            raise ValueError(f"Unknown folding method: {self._folding}")
+
+    def _fold_circuit_global(self, circuit: QuantumCircuit, noise_factor: float) -> QuantumCircuit:
+        """Apply global unitary folding to an already-transpiled circuit."""
         n = int(round(noise_factor))
         if n == 1:
             return circuit.copy()
@@ -189,7 +201,6 @@ class ZNEEstimator(BaseEstimatorV2):
         folded.compose(circuit, inplace=True)
         forward = circuit.copy()
         inverse = circuit.inverse()
-
 
         for _ in range((n - 1) // 2):
             folded.barrier()
@@ -201,6 +212,70 @@ class ZNEEstimator(BaseEstimatorV2):
         folded.metadata = {
             **(circuit.metadata or {}),
             "zne_folded": True,
+            "zne_folding_method": "global",
+            "zne_noise_factor": noise_factor,
+            "do_not_optimize": True,
+        }
+        return folded
+
+    def _fold_circuit_local(self, circuit: QuantumCircuit, noise_factor: float) -> QuantumCircuit:
+        """Apply local gate folding to approximate the target noise factor.
+
+        This method folds individual gates as G -> G G^dag G to amplify noise locally.
+        The number of gates folded is chosen to approximate the target noise factor.
+        """
+        if noise_factor == 1.0:
+            return circuit.copy()
+
+        folded = QuantumCircuit(circuit.num_qubits, circuit.num_clbits)
+        if circuit.name:
+            folded.name = circuit.name
+
+        # Copy register names
+        folded.qregs = circuit.qregs
+        folded.cregs = circuit.cregs
+
+        # Get all instructions (gates, barriers, measurements, etc.)
+        instructions = list(circuit.data)
+        num_gates = len(instructions)
+
+        if num_gates == 0:
+            return circuit.copy()
+
+        # Calculate how many gates to fold to approximate the noise factor
+        # noise_factor ≈ 1 + 2 * (num_folded_gates / num_total_gates)
+        # Solving for num_folded_gates:
+        num_gates_to_fold = int(round((noise_factor - 1.0) * num_gates / 2.0))
+        num_gates_to_fold = max(0, min(num_gates_to_fold, num_gates))
+
+        # Fold gates uniformly throughout the circuit
+        fold_interval = num_gates / max(num_gates_to_fold, 1) if num_gates_to_fold > 0 else float('inf')
+
+        for idx, (instruction, qargs, cargs) in enumerate(instructions):
+            # Add the original gate
+            folded.append(instruction, qargs, cargs)
+
+            # Determine if this gate should be folded
+            if num_gates_to_fold > 0 and idx < num_gates and (idx % max(1, int(fold_interval))) == 0 and num_gates_to_fold > 0:
+                # Only fold actual gate operations, not barriers or measurements
+                if isinstance(instruction, Instruction) and instruction.name not in ['barrier', 'measure']:
+                    try:
+                        # Fold this gate: G -> G G^dag G (already added G, now add G^dag G)
+                        inverse_instruction = instruction.inverse()
+                        folded.barrier(qargs)
+                        folded.append(inverse_instruction, qargs, cargs)
+                        folded.barrier(qargs)
+                        folded.append(instruction.copy(), qargs, cargs)
+                        num_gates_to_fold -= 1
+                    except Exception:
+                        # Some gates might not support inverse, skip folding for those
+                        pass
+
+        # Mark the circuit metadata
+        folded.metadata = {
+            **(circuit.metadata or {}),
+            "zne_folded": True,
+            "zne_folding_method": "local",
             "zne_noise_factor": noise_factor,
             "do_not_optimize": True,
         }
