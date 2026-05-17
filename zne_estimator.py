@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_ZNE_DIAGRAM_PATH = "./zne_diagrams"
-_DIAGRAM_FORMAT = "png"  # "png" | "pdf" | "svg" | "latex"
+_DIAGRAM_FORMAT = "png"
+
 class ZNEEstimator(BaseEstimatorV2):
     """Estimator that applies Zero-Noise Extrapolation (ZNE) on top of a base estimator."""
 
