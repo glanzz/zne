@@ -275,8 +275,7 @@ class ZNEEstimator(BaseEstimatorV2):
         )
         out_path = self._diagram_output_dir / fname
         try:
-            from qiskit.visualization import circuit_drawer
-            circuit_drawer(circuit, output="mpl", filename=str(out_path), idle_wires=False, fold=-1, style={"name": "iqp"})
+            circuit.draw(output="mpl", filename=str(out_path), idle_wires=False, fold=-1, style={"name": "iqp"})
 
             logger.info("Saved ZNE circuit diagram: %s", out_path)
             return out_path
