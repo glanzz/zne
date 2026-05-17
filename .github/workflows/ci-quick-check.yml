@@ -1,4 +1,4 @@
-name: Quick Tests
+name: CI Quick Check
 
 on:
   push:
