@@ -85,7 +85,6 @@ class TestInitialization:
         """Test initialization with valid parameters."""
         zne = ZNEEstimator(
             base_estimator=statevector_estimator,
-            noise_factors=(1.0, 3.0, 5.0),
             extrapolator="linear",
             folding="global",
             default_precision=0.01,
@@ -94,7 +93,6 @@ class TestInitialization:
         )
 
         assert zne._base_estimator == statevector_estimator
-        assert zne._noise_factors == (1.0, 3.0, 5.0)
         assert zne._extrapolator == "linear"
         assert zne._folding == "global"
         assert zne._default_precision == 0.01
@@ -105,12 +103,11 @@ class TestInitialization:
         """Test initialization with default parameters."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
 
-        assert zne._noise_factors == (1.0, 3.0, 5.0)
         assert zne._extrapolator == "linear"
         assert zne._folding == "global"
         assert zne._default_precision == 0.0
         assert zne._store_scaled_circuits is True
-        assert zne._save_circuit_diagrams is False
+        assert zne._save_circuit_diagrams is True
 
     def test_init_with_diagram_saving(self, statevector_estimator, temp_diagram_dir):
         """Test initialization with circuit diagram saving enabled."""
@@ -137,29 +134,6 @@ class TestInitialization:
         if zne._diagram_output_dir.exists():
             shutil.rmtree(zne._diagram_output_dir, ignore_errors=True)
 
-    def test_init_invalid_noise_factors_too_few(self, statevector_estimator):
-        """Test initialization fails with fewer than 2 noise factors."""
-        with pytest.raises(ValueError, match="at least two noise factors"):
-            ZNEEstimator(
-                base_estimator=statevector_estimator,
-                noise_factors=(1.0,),
-            )
-
-    def test_init_invalid_noise_factors_less_than_one(self, statevector_estimator):
-        """Test initialization fails with noise factors < 1."""
-        with pytest.raises(ValueError, match="must be >= 1"):
-            ZNEEstimator(
-                base_estimator=statevector_estimator,
-                noise_factors=(0.5, 1.0, 2.0),
-            )
-
-    def test_init_empty_noise_factors(self, statevector_estimator):
-        """Test initialization fails with empty noise factors."""
-        with pytest.raises(ValueError, match="at least two noise factors"):
-            ZNEEstimator(
-                base_estimator=statevector_estimator,
-                noise_factors=(),
-            )
 
 
 # ============================================================================
@@ -345,7 +319,7 @@ class TestResultFormat:
     def test_result_structure_basic(self, statevector_estimator, simple_circuit, simple_observable):
         """Test basic result structure."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         # Check result type
@@ -361,7 +335,7 @@ class TestResultFormat:
     def test_result_data_fields(self, statevector_estimator, simple_circuit, simple_observable):
         """Test result data contains evs and stds."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         data = result[0].data
@@ -378,16 +352,15 @@ class TestResultFormat:
         """Test result metadata contains ZNE-specific fields."""
         zne = ZNEEstimator(
             base_estimator=statevector_estimator,
-            noise_factors=(1.0, 3.0, 5.0),
             extrapolator="linear",
         )
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         # Check primitive result metadata
         assert result.metadata is not None
         assert result.metadata['zne'] is True
-        assert result.metadata['noise_factors'] == [1.0, 3.0, 5.0]
+        assert result.metadata['noise_factors'] == [1, 3, 5]
         assert 'job_id' in result.metadata
 
         # Check pub result metadata
@@ -395,7 +368,7 @@ class TestResultFormat:
         assert 'zne' in metadata
         zne_meta = metadata['zne']
 
-        assert zne_meta['noise_factors'] == [1.0, 3.0, 5.0]
+        assert zne_meta['noise_factors'] == [1, 3, 5]
         assert zne_meta['extrapolator'] == 'linear'
         assert 'raw_pub_results' in zne_meta
         assert 'noisy_evs' in zne_meta
@@ -408,12 +381,12 @@ class TestResultFormat:
             base_estimator=statevector_estimator,
             store_scaled_circuits=True,
         )
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         zne_meta = result[0].metadata['zne']
         assert 'scaled_circuits' in zne_meta
-        assert len(zne_meta['scaled_circuits']) == 3  # Default noise factors
+        assert len(zne_meta['scaled_circuits']) == 3  # 3 noise factors provided
         assert all(isinstance(circ, QuantumCircuit) for circ in zne_meta['scaled_circuits'])
 
     def test_result_scaled_circuits_not_stored(self, statevector_estimator, simple_circuit, simple_observable):
@@ -422,7 +395,7 @@ class TestResultFormat:
             base_estimator=statevector_estimator,
             store_scaled_circuits=False,
         )
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         zne_meta = result[0].metadata['zne']
@@ -439,7 +412,7 @@ class TestSimulatorIntegration:
     def test_statevector_estimator_integration(self, statevector_estimator, simple_circuit, simple_observable):
         """Test with StatevectorEstimator."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         # Should get valid results
@@ -461,11 +434,8 @@ class TestSimulatorIntegration:
         pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
         transpiled_circuit = pm.run(simple_circuit)
 
-        zne = ZNEEstimator(
-            base_estimator=noisy_estimator,
-            noise_factors=(1, 3),  # Use minimal factors for speed
-        )
-        job = zne.run([(transpiled_circuit, simple_observable)])
+        zne = ZNEEstimator(base_estimator=noisy_estimator)
+        job = zne.run([(transpiled_circuit, simple_observable)], noise_factors=[1, 3])
         result = job.result()
 
         # Should get valid results (no custom instructions after removing make_folded_block)
@@ -487,7 +457,7 @@ class TestSimulatorIntegration:
             (simple_circuit, obs1),
             (simple_circuit, obs2),
             (simple_circuit, obs3),
-        ])
+        ], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 3
@@ -507,7 +477,7 @@ class TestImageGeneration:
             base_estimator=statevector_estimator,
             save_circuit_diagrams=False,
         )
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         zne_meta = result[0].metadata['zne']
@@ -521,7 +491,7 @@ class TestImageGeneration:
         )
 
         try:
-            job = zne.run([(simple_circuit, simple_observable)])
+            job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
             result = job.result()
 
             zne_meta = result[0].metadata['zne']
@@ -550,7 +520,7 @@ class TestImageGeneration:
             diagram_output_dir=temp_diagram_dir,
         )
 
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         zne_meta = result[0].metadata['zne']
@@ -585,22 +555,33 @@ class TestImageGeneration:
 class TestDefaultBehavior:
     """Test that ZNE falls back to base estimator behavior when appropriate."""
 
+    def test_no_noise_factors_uses_base_estimator(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test that when no noise_factors are provided, it uses base estimator directly."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator)
+
+        # Run without noise_factors - should bypass ZNE
+        job = zne.run([(simple_circuit, simple_observable)])
+        result = job.result()
+
+        # Result should be valid
+        assert len(result) == 1
+        assert result[0].data.evs is not None
+        # Should NOT have ZNE metadata since we bypassed it
+        assert 'zne' not in result.metadata or result.metadata.get('zne') is not True
+
     def test_noise_factor_minimal(self, statevector_estimator, simple_circuit, simple_observable):
         """Test with minimal valid noise factors (1, 3)."""
         # This tests that minimal ZNE with only 2 factors works
-        zne = ZNEEstimator(
-            base_estimator=statevector_estimator,
-            noise_factors=(1, 3),  # Minimum valid odd factors
-        )
+        zne = ZNEEstimator(base_estimator=statevector_estimator)
 
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3])
         result = job.result()
 
         # Result should be valid even with minimal factors
         assert len(result) == 1
         assert result[0].data.evs is not None
         # Verify it used the specified noise factors
-        assert result.metadata['noise_factors'] == [1.0, 3.0]
+        assert result.metadata['noise_factors'] == [1, 3]
 
 
 # ============================================================================
@@ -610,21 +591,18 @@ class TestDefaultBehavior:
 class TestRuntimeOverride:
     """Test runtime parameter overrides."""
 
-    def test_noise_factor_override(self, statevector_estimator, simple_circuit, simple_observable):
-        """Test overriding noise factors at runtime."""
-        zne = ZNEEstimator(
-            base_estimator=statevector_estimator,
-            noise_factors=(1, 3, 5),  # Default
-        )
+    def test_noise_factor_runtime_specification(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test specifying noise factors at runtime."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator)
 
-        # Override with different factors
+        # Specify noise factors at runtime
         job = zne.run(
             [(simple_circuit, simple_observable)],
             noise_factors=[1, 3, 5, 7],
         )
         result = job.result()
 
-        # Check that new factors were used
+        # Check that specified factors were used
         assert result.metadata['noise_factors'] == [1, 3, 5, 7]
         assert result[0].metadata['zne']['noise_factors'] == [1, 3, 5, 7]
 
@@ -638,6 +616,7 @@ class TestRuntimeOverride:
         # Override precision
         job = zne.run(
             [(simple_circuit, simple_observable)],
+            noise_factors=[1, 3, 5],
             precision=0.001,
         )
         result = job.result()
@@ -682,7 +661,7 @@ class TestDownstreamCompatibility:
         job = zne.run([
             (simple_circuit, simple_observable),
             (simple_circuit, SparsePauliOp("XX")),
-        ])
+        ], noise_factors=[1, 3, 5])
         result = job.result()
 
         # Should be iterable
@@ -696,7 +675,7 @@ class TestDownstreamCompatibility:
         job = zne.run([
             (simple_circuit, simple_observable),
             (simple_circuit, SparsePauliOp("XX")),
-        ])
+        ], noise_factors=[1, 3, 5])
         result = job.result()
 
         # Should support indexing
@@ -707,7 +686,7 @@ class TestDownstreamCompatibility:
     def test_data_array_operations(self, statevector_estimator, simple_circuit, simple_observable):
         """Test that data arrays support numpy operations."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
         result = job.result()
 
         evs = result[0].data.evs
@@ -725,7 +704,7 @@ class TestDownstreamCompatibility:
     def test_job_interface(self, statevector_estimator, simple_circuit, simple_observable):
         """Test that job has standard interface."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(simple_circuit, simple_observable)])
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 3, 5])
 
         # Should have result method
         assert hasattr(job, 'result')
@@ -743,7 +722,7 @@ class TestEdgeCases:
     def test_empty_pubs(self, statevector_estimator):
         """Test with empty pubs list."""
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([])
+        job = zne.run([], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 0
@@ -755,7 +734,7 @@ class TestEdgeCases:
         obs = SparsePauliOp("Z")
 
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(qc, obs)])
+        job = zne.run([(qc, obs)], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 1
@@ -775,7 +754,7 @@ class TestEdgeCases:
         obs = SparsePauliOp("Z" * 4)
 
         zne = ZNEEstimator(base_estimator=statevector_estimator)
-        job = zne.run([(qc, obs)])
+        job = zne.run([(qc, obs)], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 1
@@ -794,7 +773,7 @@ class TestEdgeCases:
         zne = ZNEEstimator(base_estimator=statevector_estimator)
 
         # Provide parameter values
-        job = zne.run([(qc, obs, [np.pi/2])])
+        job = zne.run([(qc, obs, [np.pi/2])], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 1
@@ -814,7 +793,7 @@ class TestEdgeCases:
 
         # Multiple parameter values
         param_values = [[0], [np.pi/4], [np.pi/2]]
-        job = zne.run([(qc, obs, param_values)])
+        job = zne.run([(qc, obs, param_values)], noise_factors=[1, 3, 5])
         result = job.result()
 
         assert len(result) == 1
