@@ -1,8 +1,12 @@
 from __future__ import annotations
+import datetime
+import uuid
+from matplotlib.path import Path
+from zipfile import Path
 from qiskit.circuit import QuantumCircuit
 
 from collections.abc import Iterable
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 import numpy as np
 from qiskit.primitives import BaseEstimatorV2
@@ -14,9 +18,13 @@ from qiskit.primitives.containers import (
 )
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.primitives.primitive_job import PrimitiveJob
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-
+_DEFAULT_ZNE_DIAGRAM_PATH = "./zne_diagrams"
+_DIAGRAM_FORMAT = "png"  # "png" | "pdf" | "svg" | "latex"
 class ZNEEstimator(BaseEstimatorV2):
     """Estimator that applies Zero-Noise Extrapolation (ZNE) on top of a base estimator."""
 
@@ -27,7 +35,9 @@ class ZNEEstimator(BaseEstimatorV2):
         extrapolator: str = "linear",  # "linear" | "polynomial" | "exponential"
         folding: str = "global",        # "global" | "local"
         default_precision: float = 0.0,
-        store_scaled_circuits: bool = True
+        store_scaled_circuits: bool = True,
+        save_circuit_diagrams: bool = False,
+        diagram_output_dir: Optional[Union[str, Path]] = None,
     ):
         self._base_estimator = base_estimator
         self._noise_factors = tuple(noise_factors)
@@ -35,6 +45,13 @@ class ZNEEstimator(BaseEstimatorV2):
         self._folding = folding
         self._default_precision = default_precision
         self._store_scaled_circuits = store_scaled_circuits
+        self._save_circuit_diagrams = save_circuit_diagrams
+        
+        if self._save_circuit_diagrams:
+            self._diagram_output_dir = Path(diagram_output_dir or _DEFAULT_ZNE_DIAGRAM_PATH)
+            self._diagram_output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self._diagram_output_dir = None
 
         if len(self._noise_factors) < 2:
             raise ValueError("ZNE requires at least two noise factors.")
@@ -89,15 +106,19 @@ class ZNEEstimator(BaseEstimatorV2):
         pubs: list[EstimatorPub],
         factors: tuple[float, ...],
     ) -> PrimitiveResult[PubResult]:
+        job_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+
         return PrimitiveResult(
-            [self._run_single_pub(pub, factors) for pub in pubs],
-            metadata={"zne": True, "noise_factors": list(factors)},
+            [self._run_single_pub(pub, factors, pub_idx, job_id) for pub_idx, pub in enumerate(pubs)],
+            metadata={"zne": True, "noise_factors": list(factors), "job_id": job_id},
         )
 
     def _run_single_pub(
         self,
         pub: EstimatorPub,
         factors: tuple[float, ...],
+        pub_index: int,
+        job_id: str,
     ) -> PubResult:
         transpiled_circuit = pub.circuit
         observables = pub.observables
@@ -106,6 +127,11 @@ class ZNEEstimator(BaseEstimatorV2):
 
         # Build folded circuits once and retain them.
         folded_circuits = [self._fold_circuit(transpiled_circuit, nf) for nf in factors]
+        diagram_paths = [
+            self._save_circuit_diagram(fc, nf, pub_index, job_id)
+            for fc, nf in zip(folded_circuits, factors)
+        ]
+
         folded_pubs = [
             (fc, observables, parameter_values) for fc in folded_circuits
         ]
@@ -141,6 +167,11 @@ class ZNEEstimator(BaseEstimatorV2):
         }
         if self._store_scaled_circuits:
             metadata["zne"]["scaled_circuits"] = folded_circuits
+        if self._save_circuit_diagrams:
+            metadata["zne"]["circuit_diagram_paths"] = [
+                str(p) if p is not None else None for p in diagram_paths
+            ]
+
         return PubResult(data=data, metadata=metadata)
 
 
@@ -226,3 +257,33 @@ class ZNEEstimator(BaseEstimatorV2):
         # Variance of polynomial evaluated at x = 0 is cov[-1, -1] (intercept).
         std = float(np.sqrt(max(cov[-1, -1], 0.0)))
         return val, std
+
+    def _save_circuit_diagram(
+        self,
+        circuit: QuantumCircuit,
+        noise_factor: float,
+        pub_index: int,
+        job_id: str,
+    ) -> Optional[Path]:
+        """Save one circuit diagram to disk. Returns the path or None on failure."""
+        if not self._save_circuit_diagrams:
+            return None
+
+        fname = (
+            f"zne_{job_id}_pub{pub_index}_nf{noise_factor}"
+            f".{_DIAGRAM_FORMAT}"
+        )
+        out_path = self._diagram_output_dir / fname
+        try:
+            from qiskit.visualization import circuit_drawer
+            circuit_drawer(circuit, output="mpl", filename=str(out_path), idle_wires=False, fold=-1, style={"name": "iqp"})
+
+            logger.info("Saved ZNE circuit diagram: %s", out_path)
+            return out_path
+        except Exception as exc:
+            # Don't fail the whole run because of a plotting issue.
+            logger.warning(
+                "Failed to save circuit diagram for noise_factor=%s: %s",
+                noise_factor, exc,
+            )
+            return None
