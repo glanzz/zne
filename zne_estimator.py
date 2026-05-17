@@ -1,8 +1,7 @@
 from __future__ import annotations
 import datetime
 import uuid
-from matplotlib.path import Path
-from zipfile import Path
+from pathlib import Path
 from qiskit.circuit import Instruction, QuantumCircuit
 
 from collections.abc import Iterable
