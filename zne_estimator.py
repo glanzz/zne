@@ -3,7 +3,7 @@ import datetime
 import uuid
 from matplotlib.path import Path
 from zipfile import Path
-from qiskit.circuit import QuantumCircuit
+from qiskit.circuit import Instruction, QuantumCircuit
 
 from collections.abc import Iterable
 from typing import Optional, Sequence, Union
@@ -175,6 +175,15 @@ class ZNEEstimator(BaseEstimatorV2):
         return PubResult(data=data, metadata=metadata)
 
 
+    def _make_folded_block(self, circuit: QuantumCircuit) -> Instruction:
+        """Build a named instruction representing one (U^dagger U) fold."""
+        block = QuantumCircuit(circuit.num_qubits, name="zne_fold")
+        block.barrier()
+        block.compose(circuit.inverse(), inplace=True)
+        block.barrier()
+        block.compose(circuit, inplace=True)
+    
+        return block.to_instruction()
 
     def _fold_circuit(self, circuit: QuantumCircuit, noise_factor: float) -> QuantumCircuit:
         """Apply global unitary folding to an already-transpiled circuit.
@@ -189,14 +198,11 @@ class ZNEEstimator(BaseEstimatorV2):
             return circuit.copy()
 
         folded = circuit.copy_empty_like()
-        folded.compose(circuit, inplace=True)  # the leading U
+        folded.compose(circuit, inplace=True)
 
-        inverse = circuit.inverse()
+        fold_block = self._make_folded_block(circuit)
         for _ in range((n - 1) // 2):
-            # Wrap (U^dagger U) in a box so it survives optimization.
-            # with folded.box():
-            folded.compose(inverse, inplace=True)
-            folded.compose(circuit, inplace=True)
+            folded.append(fold_block, folded.qubits)
 
         # Mark the whole circuit so callers know not to re-optimize it.
         folded.metadata = {
