@@ -30,32 +30,25 @@ class ZNEEstimator(BaseEstimatorV2):
     def __init__(
         self,
         base_estimator: BaseEstimatorV2,
-        noise_factors: tuple[float, ...] = (1.0, 3.0, 5.0),
         extrapolator: str = "linear",  # "linear" | "polynomial" | "exponential"
         folding: str = "global",        # "global" | "local"
         default_precision: float = 0.0,
         store_scaled_circuits: bool = True,
-        save_circuit_diagrams: bool = False,
+        save_circuit_diagrams: bool = True,
         diagram_output_dir: Optional[Union[str, Path]] = None,
     ):
         self._base_estimator = base_estimator
-        self._noise_factors = tuple(noise_factors)
         self._extrapolator = extrapolator
         self._folding = folding
         self._default_precision = default_precision
         self._store_scaled_circuits = store_scaled_circuits
         self._save_circuit_diagrams = save_circuit_diagrams
-        
+
         if self._save_circuit_diagrams:
             self._diagram_output_dir = Path(diagram_output_dir or _DEFAULT_ZNE_DIAGRAM_PATH)
             self._diagram_output_dir.mkdir(parents=True, exist_ok=True)
         else:
             self._diagram_output_dir = None
-
-        if len(self._noise_factors) < 2:
-            raise ValueError("ZNE requires at least two noise factors.")
-        if any(nf < 1 for nf in self._noise_factors):
-            raise ValueError("All noise factors must be >= 1.")
 
 
     def run(
@@ -70,14 +63,18 @@ class ZNEEstimator(BaseEstimatorV2):
         Args:
             pubs: Iterable of pub-like objects.
             precision: Target precision for any pub that does not set its own.
-            noise_factors: Per-call override of the noise factors used for
-                circuit folding, e.g. ``[1, 3, 5]``. Falls back to the value
-                supplied at construction time when ``None``.
+            noise_factors: Noise factors used for circuit folding, e.g. ``[1, 3, 5]``.
+                If ``None``, falls back to the base estimator's default behavior
+                without applying ZNE.
         """
         if precision is None:
             precision = self._default_precision
 
-        factors = tuple(noise_factors) if noise_factors is not None else self._noise_factors
+        # If no noise factors provided, bypass ZNE and use base estimator directly
+        if noise_factors is None:
+            return self._base_estimator.run(pubs, precision=precision)
+
+        factors = tuple(noise_factors)
         self._validate_noise_factors(factors)
 
         coerced_pubs: list[EstimatorPub] = [
