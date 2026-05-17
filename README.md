@@ -2,9 +2,19 @@
 
 A custom Qiskit Estimator implementing Zero Noise Extrapolation (ZNE), a quantum error mitigation technique that improves expectation value estimates by amplifying and extrapolating circuit noise.
 
+
+## Navigating this repository
+- [zne_estimator.py](./zne_estimator.py): Main implementation of the ZNEEstimator class
+- [zne.ipynb](./zne.ipynb): Jupyter notebook demonstrating usage and workflow of the ZNEEstimator with exponential extrapolation and global folding for a 4-qubit GHZ circuit with XXXX observable, showing results for 3 noise factors (1,3,5) and 5 noise factors (1,3,5,7,9).
+- [`tests/`](./tests): Directory containing pytest tests for the ZNEEstimator
+- `README.md`: This file, providing an overview and documentation for the ZNEEstimator
+- [`.zne_diagrams`](./.zne_diagrams): Directory for saving circuit diagrams generated during ZNE runs from [zne.ipynb](./zne.ipynb)
+
 ## Overview
 
 The estimator class provides a drop-in replacement for standard Qiskit estimators, with additional parameters to enable ZNE. It supports both global and local folding methods for noise scaling, and multiple extrapolation techniques (polynomial, linear, exponential). The implementation is designed to be flexible and compatible with various backends, including ideal simulators and noisy density matrix simulators. The estimator also includes options for saving circuit diagrams and detailed metadata in the results for analysis. The estimator also avoids further transpilation after folding to preserve the noise scaling, and includes comprehensive error handling for invalid parameters.
+
+
 
 ## ZNE Variant
 
