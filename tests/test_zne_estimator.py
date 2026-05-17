@@ -143,30 +143,53 @@ class TestInitialization:
 class TestNoiseFactorValidation:
     """Test noise factor validation."""
 
-    def test_validate_valid_odd_integers(self):
-        """Test validation passes for odd integers."""
+    def test_validate_valid_odd_integers_global(self, statevector_estimator):
+        """Test validation passes for odd integers with global folding."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         # Should not raise
-        ZNEEstimator._validate_noise_factors([1, 3, 5, 7])
+        zne._validate_noise_factors([1, 3, 5, 7])
 
-    def test_validate_invalid_even_integers(self):
-        """Test validation fails for even integers."""
+    def test_validate_invalid_even_integers_global(self, statevector_estimator):
+        """Test validation fails for even integers with global folding."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         with pytest.raises(ValueError, match="odd integer"):
-            ZNEEstimator._validate_noise_factors([1, 2, 3])
+            zne._validate_noise_factors([1, 2, 3])
 
-    def test_validate_invalid_floats(self):
-        """Test validation fails for non-integer floats."""
+    def test_validate_invalid_floats_global(self, statevector_estimator):
+        """Test validation fails for non-integer floats with global folding."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         with pytest.raises(ValueError, match="odd integer"):
-            ZNEEstimator._validate_noise_factors([1.0, 3.5, 5.0])
+            zne._validate_noise_factors([1.0, 3.5, 5.0])
 
-    def test_validate_invalid_negative(self):
+    def test_validate_valid_floats_local(self, statevector_estimator):
+        """Test validation passes for float noise factors with local folding."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+        # Should not raise - local folding accepts any factors >= 1
+        zne._validate_noise_factors([1.0, 1.5, 2.0, 2.5])
+
+    def test_validate_valid_even_integers_local(self, statevector_estimator):
+        """Test validation passes for even integers with local folding."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+        # Should not raise - local folding accepts even integers
+        zne._validate_noise_factors([1, 2, 3, 4])
+
+    def test_validate_invalid_negative(self, statevector_estimator):
         """Test validation fails for negative values."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         with pytest.raises(ValueError, match="must be >= 1"):
-            ZNEEstimator._validate_noise_factors([-1, 1, 3])
+            zne._validate_noise_factors([-1, 1, 3])
 
-    def test_validate_invalid_zero(self):
+    def test_validate_invalid_zero(self, statevector_estimator):
         """Test validation fails for zero."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         with pytest.raises(ValueError, match="must be >= 1"):
-            ZNEEstimator._validate_noise_factors([0, 1, 3])
+            zne._validate_noise_factors([0, 1, 3])
+
+    def test_validate_too_few_factors(self, statevector_estimator):
+        """Test validation fails with less than 2 noise factors."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
+        with pytest.raises(ValueError, match="at least two"):
+            zne._validate_noise_factors([1])
 
 
 # ============================================================================
@@ -176,9 +199,9 @@ class TestNoiseFactorValidation:
 class TestCircuitFolding:
     """Test circuit folding functionality."""
 
-    def test_fold_circuit_factor_1(self, statevector_estimator, simple_circuit):
-        """Test folding with noise factor 1 returns original circuit."""
-        zne = ZNEEstimator(base_estimator=statevector_estimator)
+    def test_fold_circuit_factor_1_global(self, statevector_estimator, simple_circuit):
+        """Test global folding with noise factor 1 returns original circuit."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         folded = zne._fold_circuit(simple_circuit, 1.0)
 
         # Should be a copy with same structure
@@ -186,32 +209,80 @@ class TestCircuitFolding:
         assert len(folded.data) == len(simple_circuit.data)
         assert folded is not simple_circuit  # Should be a copy
 
-    def test_fold_circuit_factor_3(self, statevector_estimator, simple_circuit):
-        """Test folding with noise factor 3."""
-        zne = ZNEEstimator(base_estimator=statevector_estimator)
+    def test_fold_circuit_factor_1_local(self, statevector_estimator, simple_circuit):
+        """Test local folding with noise factor 1 returns original circuit."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+        folded = zne._fold_circuit(simple_circuit, 1.0)
+
+        # Should be a copy with same structure
+        assert folded.num_qubits == simple_circuit.num_qubits
+        assert len(folded.data) == len(simple_circuit.data)
+        assert folded is not simple_circuit  # Should be a copy
+
+    def test_fold_circuit_factor_3_global(self, statevector_estimator, simple_circuit):
+        """Test global folding with noise factor 3."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         folded = zne._fold_circuit(simple_circuit, 3.0)
 
         # Should have metadata
         assert folded.metadata is not None
         assert folded.metadata["zne_folded"] is True
+        assert folded.metadata["zne_folding_method"] == "global"
         assert folded.metadata["zne_noise_factor"] == 3.0
         assert folded.metadata["do_not_optimize"] is True
 
-    def test_fold_circuit_factor_5(self, statevector_estimator, simple_circuit):
-        """Test folding with noise factor 5."""
-        zne = ZNEEstimator(base_estimator=statevector_estimator)
+    def test_fold_circuit_factor_2_local(self, statevector_estimator, simple_circuit):
+        """Test local folding with noise factor 2."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+        folded = zne._fold_circuit(simple_circuit, 2.0)
+
+        # Should have metadata
+        assert folded.metadata is not None
+        assert folded.metadata["zne_folded"] is True
+        assert folded.metadata["zne_folding_method"] == "local"
+        assert folded.metadata["zne_noise_factor"] == 2.0
+        assert folded.metadata["do_not_optimize"] is True
+
+        # Local folding with factor 2 should add some gates
+        assert len(folded.data) > len(simple_circuit.data)
+
+    def test_fold_circuit_factor_5_global(self, statevector_estimator, simple_circuit):
+        """Test global folding with noise factor 5."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         folded = zne._fold_circuit(simple_circuit, 5.0)
 
         # Should have more gates than factor 3
         assert folded.metadata["zne_noise_factor"] == 5.0
+        assert folded.metadata["zne_folding_method"] == "global"
 
     def test_folded_circuit_preserves_qubits(self, statevector_estimator, simple_circuit):
         """Test that folding preserves qubit count."""
-        zne = ZNEEstimator(base_estimator=statevector_estimator)
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="global")
         folded = zne._fold_circuit(simple_circuit, 3.0)
 
         # Should preserve number of qubits
         assert folded.num_qubits == simple_circuit.num_qubits
+
+    def test_local_folding_increases_circuit_size(self, statevector_estimator, simple_circuit):
+        """Test that local folding increases circuit size proportionally."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+
+        folded_1_5 = zne._fold_circuit(simple_circuit, 1.5)
+        folded_2_0 = zne._fold_circuit(simple_circuit, 2.0)
+        folded_3_0 = zne._fold_circuit(simple_circuit, 3.0)
+
+        # Higher noise factors should result in more gates
+        assert len(folded_1_5.data) >= len(simple_circuit.data)
+        assert len(folded_2_0.data) >= len(folded_1_5.data)
+        assert len(folded_3_0.data) >= len(folded_2_0.data)
+
+    def test_invalid_folding_method(self, statevector_estimator, simple_circuit):
+        """Test that invalid folding method raises error."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator)
+        zne._folding = "invalid"
+
+        with pytest.raises(ValueError, match="Unknown folding method"):
+            zne._fold_circuit(simple_circuit, 3.0)
 
 
 # ============================================================================
@@ -853,6 +924,171 @@ class TestNumericalStability:
         # Should handle gracefully due to clipping
         assert not np.isnan(val)
         assert not np.isnan(std)
+
+
+# ============================================================================
+# Test Local Folding
+# ============================================================================
+
+class TestLocalFolding:
+    """Test local folding specific functionality."""
+
+    def test_local_folding_with_float_noise_factors(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test local folding accepts and works with float noise factors."""
+        zne = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="local",
+            extrapolator="linear",
+        )
+
+        # Run with float noise factors
+        job = zne.run(
+            [(simple_circuit, simple_observable)],
+            noise_factors=[1.0, 1.5, 2.0, 2.5, 3.0]
+        )
+        result = job.result()
+
+        # Should get valid results
+        assert len(result) == 1
+        assert result[0].data.evs is not None
+        assert result.metadata['noise_factors'] == [1.0, 1.5, 2.0, 2.5, 3.0]
+
+    def test_local_folding_with_even_integers(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test local folding accepts even integer noise factors."""
+        zne = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="local",
+            extrapolator="linear",
+        )
+
+        # Run with even integers (not allowed for global folding)
+        job = zne.run(
+            [(simple_circuit, simple_observable)],
+            noise_factors=[1, 2, 3, 4]
+        )
+        result = job.result()
+
+        # Should succeed
+        assert len(result) == 1
+        assert result[0].data.evs is not None
+
+    def test_local_folding_circuit_structure(self, statevector_estimator, simple_circuit):
+        """Test local folding produces correct circuit structure."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+
+        # Test with a known circuit
+        folded = zne._fold_circuit(simple_circuit, 2.0)
+
+        # Check that some gates were folded (circuit should be larger)
+        assert len(folded.data) > len(simple_circuit.data)
+
+        # Check metadata
+        assert folded.metadata["zne_folding_method"] == "local"
+        assert folded.metadata["zne_noise_factor"] == 2.0
+
+    def test_local_folding_empty_circuit(self, statevector_estimator):
+        """Test local folding handles empty circuits gracefully."""
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+
+        empty_circuit = QuantumCircuit(2)
+        folded = zne._fold_circuit(empty_circuit, 2.0)
+
+        # Should handle empty circuit without error
+        assert folded.num_qubits == 2
+        assert len(folded.data) == 0
+
+    def test_local_folding_preserves_register_names(self, statevector_estimator):
+        """Test that local folding preserves quantum and classical register names."""
+        from qiskit import QuantumRegister, ClassicalRegister
+
+        qr = QuantumRegister(2, 'q')
+        cr = ClassicalRegister(2, 'c')
+        qc = QuantumCircuit(qr, cr)
+        qc.h(qr[0])
+        qc.cx(qr[0], qr[1])
+
+        zne = ZNEEstimator(base_estimator=statevector_estimator, folding="local")
+        folded = zne._fold_circuit(qc, 2.0)
+
+        # Check register names preserved
+        assert len(folded.qregs) == 1
+        assert len(folded.cregs) == 1
+        assert folded.qregs[0].name == 'q'
+        assert folded.cregs[0].name == 'c'
+
+    def test_local_vs_global_folding_results(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test that local and global folding both produce valid results."""
+        zne_global = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="global",
+            extrapolator="linear",
+        )
+
+        zne_local = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="local",
+            extrapolator="linear",
+        )
+
+        # Use odd integers for both
+        noise_factors = [1, 3, 5]
+
+        job_global = zne_global.run([(simple_circuit, simple_observable)], noise_factors=noise_factors)
+        result_global = job_global.result()
+
+        job_local = zne_local.run([(simple_circuit, simple_observable)], noise_factors=noise_factors)
+        result_local = job_local.result()
+
+        # Both should produce valid results
+        assert result_global[0].data.evs is not None
+        assert result_local[0].data.evs is not None
+
+        # Results should be reasonably close (but not identical due to different folding strategies)
+        ev_global = result_global[0].data.evs.item() if result_global[0].data.evs.ndim == 0 else result_global[0].data.evs[0]
+        ev_local = result_local[0].data.evs.item() if result_local[0].data.evs.ndim == 0 else result_local[0].data.evs[0]
+
+        # Both should be close to ideal value (Bell state ZZ = 1.0)
+        assert abs(ev_global - 1.0) < 0.2
+        assert abs(ev_local - 1.0) < 0.2
+
+    def test_local_folding_metadata_in_results(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test that local folding metadata is correctly stored in results."""
+        zne = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="local",
+            store_scaled_circuits=True,
+        )
+
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=[1, 2, 3])
+        result = job.result()
+
+        # Check metadata
+        zne_meta = result[0].metadata['zne']
+        assert 'scaled_circuits' in zne_meta
+
+        # Check each scaled circuit has correct metadata
+        for circuit in zne_meta['scaled_circuits']:
+            if circuit.metadata and 'zne_folded' in circuit.metadata:
+                assert circuit.metadata['zne_folding_method'] == 'local'
+
+    def test_local_folding_fine_grained_noise_control(self, statevector_estimator, simple_circuit, simple_observable):
+        """Test local folding with fine-grained noise factor control."""
+        zne = ZNEEstimator(
+            base_estimator=statevector_estimator,
+            folding="local",
+            extrapolator="polynomial",
+        )
+
+        # Use many fine-grained noise factors
+        noise_factors = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+
+        job = zne.run([(simple_circuit, simple_observable)], noise_factors=noise_factors)
+        result = job.result()
+
+        # Should produce valid results with fine-grained control
+        assert len(result) == 1
+        assert result[0].data.evs is not None
+        assert result.metadata['noise_factors'] == noise_factors
 
 
 if __name__ == "__main__":
