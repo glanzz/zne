@@ -254,10 +254,20 @@ class ZNEEstimator(BaseEstimatorV2):
         else:
             raise ValueError(f"Unknown extrapolator: {self._extrapolator}")
 
-        coeffs, cov = np.polyfit(xs, ys, degree, w=weights, cov=True)
-        val = float(np.polyval(coeffs, 0.0))
-        # Variance of polynomial evaluated at x = 0 is cov[-1, -1] (intercept).
-        std = float(np.sqrt(max(cov[-1, -1], 0.0)))
+        # Check if we have enough data points for covariance calculation
+        # np.polyfit with cov=True requires at least degree + 2 points
+        if len(xs) >= degree + 2:
+            coeffs, cov = np.polyfit(xs, ys, degree, w=weights, cov=True)
+            val = float(np.polyval(coeffs, 0.0))
+            # Variance of polynomial evaluated at x = 0 is cov[-1, -1] (intercept).
+            std = float(np.sqrt(max(cov[-1, -1], 0.0)))
+        else:
+            # Not enough points for covariance, just fit without it
+            coeffs = np.polyfit(xs, ys, degree, w=weights)
+            val = float(np.polyval(coeffs, 0.0))
+            # Estimate std from residuals
+            resid = ys - np.polyval(coeffs, xs)
+            std = float(np.sqrt(np.mean(resid ** 2)))
         return val, std
 
     def _save_circuit_diagram(
